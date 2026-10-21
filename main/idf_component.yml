@@ -1,0 +1,3 @@
+# The it8951 driver now lives in components/it8951-esp32 (local copy, patched
+# for ESP-IDF 6 and the 4-byte alignment on this panel).
+dependencies: {}
