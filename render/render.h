@@ -14,6 +14,9 @@ inline constexpr int MARGIN_X = 80;
 inline constexpr int MARGIN_TOP = 100;
 inline constexpr int MARGIN_BOTTOM = 100;
 inline constexpr int GLYPH_BUF = 128 * 128; 
+inline constexpr float SPLASH_MAX_PX = 260.0f;   
+inline constexpr int SPLASH_GLYPH_SIDE = 420;
 
 size_t render_page(uint8_t *fb, uint16_t pw, uint16_t ph,
                    const char *text, size_t len, size_t start);
+void render_splash(uint8_t *fb, uint16_t pw, uint16_t ph, const char *text);

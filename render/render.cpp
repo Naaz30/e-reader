@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "esp_heap_caps.h"
+
 #include "esp_log.h"
 #include "font.h"
 #include "stb_truetype.h"
@@ -90,15 +92,16 @@ static float measure_word(const stbtt_fontinfo &f, float scale, const char *text
     return w;
 }
 
+static uint8_t page_gbuf[GLYPH_BUF];
+
 static void draw_glyph(uint8_t *fb, uint16_t pw, uint16_t ph, int lw, int lh,
                        const stbtt_fontinfo &f, float scale, uint32_t cp,
-                       float pen_x, int baseline)
+                       float pen_x, int baseline, uint8_t *gbuf, size_t gcap)
 {
-    static uint8_t gbuf[GLYPH_BUF];
     int x0, y0, x1, y1;
     stbtt_GetCodepointBitmapBox(&f, cp, scale, scale, &x0, &y0, &x1, &y1);
     const int gw = x1 - x0, gh = y1 - y0;
-    if (gw <= 0 || gh <= 0 || gw * gh > GLYPH_BUF) return;
+    if (gw <= 0 || gh <= 0 || (size_t)(gw * gh) > gcap) return;
 
     memset(gbuf, 0, (size_t)gw * gh);
     stbtt_MakeCodepointBitmap(&f, gbuf, gw, gh, gw, scale, scale, cp);
@@ -184,11 +187,73 @@ size_t render_page(uint8_t *fb, uint16_t pw, uint16_t ph,
                 size_t pk = kk;
                 nxt = utf8_next(text, len, pk);
             }
-            draw_glyph(fb, pw, ph, lw, lh, font, scale, cp, pen_x, (int)(baseline + 0.5f));
+            draw_glyph(fb, pw, ph, lw, lh, font, scale, cp, pen_x, (int)(baseline + 0.5f),
+                       page_gbuf, sizeof(page_gbuf));
             pen_x += advance_of(font, scale, cp, nxt);
             k = kk;
         }
         i = j;
     }
     return len;
+}
+
+
+static float line_width(const stbtt_fontinfo &f, float scale, const char *text, size_t len)
+{
+    float w = 0;
+    size_t i = 0;
+    while (i < len) {
+        const uint32_t cp = utf8_next(text, len, i);
+        uint32_t nxt = 0;
+        if (i < len) {
+            size_t pk = i;
+            nxt = utf8_next(text, len, pk);
+        }
+        w += advance_of(f, scale, cp, nxt);
+    }
+    return w;
+}
+
+void render_splash(uint8_t *fb, uint16_t pw, uint16_t ph, const char *text)
+{
+    stbtt_fontinfo font;
+    if (!stbtt_InitFont(&font, font_script_data(),
+                        stbtt_GetFontOffsetForIndex(font_script_data(), 0))) {
+        ESP_LOGE(TAG, "could not read the handwriting font");
+        return;
+    }
+    const size_t len = strlen(text);
+    const int lw = PORTRAIT ? ph : pw; 
+    const int lh = PORTRAIT ? pw : ph;
+
+    const float w100 = line_width(font, stbtt_ScaleForPixelHeight(&font, 100.0f), text, len);
+    if (w100 <= 0) return;
+    float px = 100.0f * (lw * 0.80f) / w100;
+    if (px > SPLASH_MAX_PX) px = SPLASH_MAX_PX;
+
+    const float scale = stbtt_ScaleForPixelHeight(&font, px);
+    int ascent, descent, linegap;
+    stbtt_GetFontVMetrics(&font, &ascent, &descent, &linegap);
+
+    float pen_x = (lw - line_width(font, scale, text, len)) / 2.0f;     
+    const int baseline = (int)(lh / 2.0f + (ascent + descent) * scale / 2.0f + 0.5f); 
+
+    const size_t gcap = (size_t)SPLASH_GLYPH_SIDE * SPLASH_GLYPH_SIDE;
+    uint8_t *gbuf = (uint8_t *)heap_caps_malloc(gcap, MALLOC_CAP_SPIRAM);
+    if (!gbuf) {
+        ESP_LOGE(TAG, "out of memory for the greeting");
+        return;
+    }
+    size_t i = 0;
+    while (i < len) {
+        const uint32_t cp = utf8_next(text, len, i);
+        uint32_t nxt = 0;
+        if (i < len) {
+            size_t pk = i;
+            nxt = utf8_next(text, len, pk);
+        }
+        draw_glyph(fb, pw, ph, lw, lh, font, scale, cp, pen_x, baseline, gbuf, gcap);
+        pen_x += advance_of(font, scale, cp, nxt);
+    }
+    free(gbuf);
 }

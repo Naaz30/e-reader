@@ -8,6 +8,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "driver/rtc_io.h"
+#include "esp_sleep.h"
 #include "it8951.h"
 #include "page.h"
 
@@ -20,9 +22,17 @@ static constexpr Demo DEMO = Demo::Page;
 
 extern const char book_start[] asm("_binary_sample_txt_start");
 extern const char book_end[] asm("_binary_sample_txt_end");
+extern const char story_start[] asm("_binary_lighthouse_txt_start");
+extern const char story_end[] asm("_binary_lighthouse_txt_end");
+
+static const Book BOOKS[] = {
+    {"Sample Story",             book_start,  (size_t)(book_end - book_start) - 1},
+    {"The Lighthouse at Marrow Point", story_start, (size_t)(story_end - story_start) - 1},
+};
 
 static IT8951 display;
-static constexpr gpio_num_t QUIT_PIN = GPIO_NUM_0;
+static constexpr gpio_num_t QUIT_PIN = GPIO_NUM_0; 
+static constexpr gpio_num_t POWER_PIN = GPIO_NUM_2;
 static volatile bool quit_requested = false;
 static bool display_ready = false;
 
@@ -55,8 +65,8 @@ static void run()
     ESP_LOGI(TAG, "Drawing...");
     const size_t book_len = (size_t)(book_end - book_start) - 1;
     if (DEMO == Demo::Page) {
-        // Flip pages with the button on GPIO1; returns when BOOT is pressed.
-        read_book(display, book_start, book_len);
+        show_splash(display, "hey, babe!", 1500);
+        run_library(display, BOOKS, (int)(sizeof(BOOKS) / sizeof(BOOKS[0])));
         return;
     }
     draw_screen(display, DEMO, book_start, book_len);
@@ -85,9 +95,20 @@ static void run()
     }
 }
 
+static void deep_sleep_until_power_button()
+{
+    ESP_LOGI(TAG, "Sleeping. Press the power button (GPIO2) to wake.");
+    rtc_gpio_init(POWER_PIN);
+    rtc_gpio_set_direction(POWER_PIN, RTC_GPIO_MODE_INPUT_ONLY);
+    rtc_gpio_pullup_en(POWER_PIN);
+    rtc_gpio_pulldown_dis(POWER_PIN);
+    esp_sleep_enable_ext0_wakeup(POWER_PIN, 0);   
+    esp_deep_sleep_start();                     
+}
+
 extern "C" void app_main(void)
 {
     run();
     clear_display_on_exit();
-    ESP_LOGI(TAG, "Finished.");
+    deep_sleep_until_power_button();
 }
